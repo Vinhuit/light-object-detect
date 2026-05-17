@@ -1,13 +1,15 @@
 # Light Object Detection API
 
-A lightweight Python API for object detection with pluggable backends. This API allows you to detect objects in images using different detection backends, starting with TensorFlow Lite.
+A lightweight Python API for object detection and face recognition with pluggable backends. It is designed to be simple to run beside NVR software such as lightNVR while keeping object detection, face matching, and face crop extraction in a separate service.
 
 ## Features
 
 - FastAPI-based REST API for object detection
 - Pluggable backend architecture for different detection engines
-- TensorFlow Lite integration for lightweight, efficient object detection
+- ONNX/YOLO object detection by default, with optional TensorFlow Lite support
 - Support for image uploads and detection with confidence thresholds
+- InsightFace-based face training, recognition, and face crop detection
+- SQLite-backed local face embedding database
 - Extensible design for adding new detection backends
 
 ## Requirements
@@ -91,9 +93,20 @@ docker run --rm -p 8000:8000 --name light-object-detect `
 
 ### lightNVR Integration
 
-In lightNVR, the API URL is typically:
+In lightNVR, the object detection API URL is typically:
 
 - `http://<docker-host>:8000/api/v1/detect`
+
+For face recognition in lightNVR, use:
+
+- `http://<docker-host>:8000/api/v1/faces/recognize`
+
+When running both services in the same Docker Compose project, the service name can be used instead:
+
+- `http://light-object-detect:8000/api/v1/detect`
+- `http://light-object-detect:8000/api/v1/faces/recognize`
+
+Face embeddings are stored in `data/faces.db` by default. Mount `/app/data` as a Docker volume if you want trained faces to survive container rebuilds.
 
 ## API Endpoints
 
@@ -101,16 +114,78 @@ In lightNVR, the API URL is typically:
 - `GET /health` - Health check endpoint (useful for Docker/Unraid)
 - `GET /api/v1/backends` - List available detection backends
 - `POST /api/v1/detect` - Detect objects in an uploaded image
+- `POST /api/v1/faces/train` - Train a known face from an uploaded image
+- `POST /api/v1/faces/recognize` - Recognize the most prominent face in an uploaded image
+- `POST /api/v1/faces/detect` - Detect all faces and return normalized boxes plus JPEG crops
+- `GET /api/v1/faces/list` - List trained faces
+- `DELETE /api/v1/faces/{face_id}` - Delete a trained face
 
 ### Example: Detect objects in an image
 
 ```bash
 curl -X POST "http://localhost:9001/api/v1/detect" \
   -H "accept: application/json" \
-  -H "Content-Type: multipart/form-data" \
   -F "file=@/path/to/your/image.jpg" \
-  -F "backend=tflite" \
+  -F "backend=onnx" \
   -F "confidence_threshold=0.5"
+```
+
+### Example: Train a face
+
+```bash
+curl -X POST "http://localhost:9001/api/v1/faces/train" \
+  -F "name=Alice" \
+  -F "file=@/path/to/alice.jpg"
+```
+
+### Example: Recognize a face
+
+```bash
+curl -X POST "http://localhost:9001/api/v1/faces/recognize" \
+  -F "file=@/path/to/snapshot.jpg"
+```
+
+Example response:
+
+```json
+{
+  "success": true,
+  "name": "Alice",
+  "confidence": 0.71,
+  "process_time_ms": 320
+}
+```
+
+If no trained face matches, the API returns `success: false` and `name: "Unknown"`.
+
+### Example: Detect face boxes and crops
+
+```bash
+curl -X POST "http://localhost:9001/api/v1/faces/detect" \
+  -F "file=@/path/to/snapshot.jpg"
+```
+
+Example response:
+
+```json
+{
+  "success": true,
+  "face_count": 1,
+  "faces": [
+    {
+      "index": 0,
+      "bbox": {
+        "x": 0.32,
+        "y": 0.18,
+        "width": 0.14,
+        "height": 0.22
+      },
+      "confidence": 0.86,
+      "crop_jpeg_base64": "..."
+    }
+  ],
+  "process_time_ms": 95
+}
 ```
 
 ## Adding New Backends
@@ -128,11 +203,13 @@ light-object-detect/
 ├── api/                    # API endpoints
 │   ├── v1/                 # API version 1
 │   │   └── endpoints/      # API endpoints
-│   │       └── detection.py # Detection endpoints
+│   │       ├── detection.py # Object detection endpoints
+│   │       └── recognition.py # Face recognition endpoints
 │   └── router.py           # API router
 ├── backends/               # Detection backends
 │   ├── base.py             # Base backend interface
 │   ├── factory.py          # Backend factory
+│   ├── face/               # InsightFace recognition engine
 │   └── tflite/             # TFLite backend
 │       └── backend.py      # TFLite implementation
 ├── models/                 # Data models
@@ -142,6 +219,7 @@ light-object-detect/
 │   ├── run_server.py       # Script to run the API server
 │   └── test_api.py         # Script to test the API
 ├── utils/                  # Utility functions
+│   ├── face_db.py          # SQLite face embedding database
 │   └── image.py            # Image processing utilities
 ├── config.py               # Application configuration
 ├── main.py                 # FastAPI application
