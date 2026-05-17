@@ -33,6 +33,7 @@ ENV/
 
 # TFLite models and data
 backends/tflite/models/
+data/
 
 # PyTorch weights (used only for export, not deployed)
 *.pt

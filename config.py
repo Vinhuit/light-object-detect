@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     MAX_IMAGE_SIZE: int = 1024  # Maximum dimension (width or height) in pixels
     SUPPORTED_FORMATS: List[str] = ["jpg", "jpeg", "png"]
     
+    # Face Recognition settings
+    FACE_DB_PATH: str = "data/faces.db"
+    FACE_MATCH_THRESHOLD: float = 0.5  # Cosine similarity threshold for arcface
+
     class Config:
         env_file = ".env"
         case_sensitive = True

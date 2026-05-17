@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from typing import List, Optional
 
-from api.v1.endpoints import detection, tracking
+from api.v1.endpoints import detection, tracking, recognition
 from config import settings
 
 router = APIRouter()
@@ -17,4 +17,10 @@ router.include_router(
     tracking.router,
     prefix=settings.API_V1_STR,
     tags=["tracking"]
+)
+
+router.include_router(
+    recognition.router,
+    prefix=settings.API_V1_STR,
+    tags=["recognition"]
 )
