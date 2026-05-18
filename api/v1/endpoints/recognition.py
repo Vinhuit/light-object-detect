@@ -406,6 +406,8 @@ class FaceListItem(BaseModel):
     id: int
     name: str
     sample_count: int = 1
+    first_trained_at: Optional[str] = None
+    last_trained_at: Optional[str] = None
     thumbnail_url: Optional[str] = None
 
 class FaceListResponse(BaseModel):
@@ -422,32 +424,51 @@ async def list_faces():
     List trained people, grouping multiple samples with the same name.
     """
     db = get_face_db()
-    known_faces = db.get_all_faces()
+    known_faces = db.get_all_face_summaries()
     
     grouped = {}
-    for face_id, name, _ in known_faces:
+    for face_id, name, created_at in known_faces:
         display_name = (name or "").strip() or "Unknown"
         key = display_name.lower()
         group = grouped.setdefault(key, {
             "id": face_id,
             "name": display_name,
+            "name_counts": {},
             "sample_count": 0,
             "thumbnail_id": None,
+            "first_trained_at": created_at,
+            "last_trained_at": created_at,
         })
         group["sample_count"] += 1
+        group["name_counts"][display_name] = group["name_counts"].get(display_name, 0) + 1
         group["id"] = min(group["id"], face_id)
+        if created_at:
+            if not group["first_trained_at"] or created_at < group["first_trained_at"]:
+                group["first_trained_at"] = created_at
+            if not group["last_trained_at"] or created_at > group["last_trained_at"]:
+                group["last_trained_at"] = created_at
         if _face_sample_path(face_id).exists():
             group["thumbnail_id"] = face_id
 
     faces_list = []
-    for group in sorted(grouped.values(), key=lambda item: item["name"].lower()):
+    for group in sorted(
+        grouped.values(),
+        key=lambda item: (item["last_trained_at"] or "", item["name"].lower()),
+        reverse=True,
+    ):
         thumbnail_url = None
         if group["thumbnail_id"] is not None:
             thumbnail_url = f"/api/v1/faces/{group['thumbnail_id']}/image"
+        display_name = max(
+            group["name_counts"].items(),
+            key=lambda item: (item[1], -len(item[0])),
+        )[0]
         faces_list.append(FaceListItem(
             id=group["id"],
-            name=group["name"],
+            name=display_name,
             sample_count=group["sample_count"],
+            first_trained_at=group["first_trained_at"],
+            last_trained_at=group["last_trained_at"],
             thumbnail_url=thumbnail_url,
         ))
         

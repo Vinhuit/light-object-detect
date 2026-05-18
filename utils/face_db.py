@@ -104,3 +104,11 @@ class FaceDB:
 
     def get_all_faces(self) -> List[Tuple[int, str, np.ndarray]]:
         return self.faces_cache
+
+    def get_all_face_summaries(self) -> List[Tuple[int, str, str]]:
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, name, created_at FROM known_faces ORDER BY created_at DESC, id DESC')
+        rows = cursor.fetchall()
+        conn.close()
+        return [(int(face_id), name, created_at) for face_id, name, created_at in rows]
