@@ -126,9 +126,9 @@ Face crop quality can be tuned with environment variables:
 - `POST /api/v1/faces/train-box` - Train from a full image while selecting the detected face nearest a normalized target box
 - `POST /api/v1/faces/recognize` - Recognize the most prominent face in an uploaded image
 - `POST /api/v1/faces/detect` - Detect all faces and return normalized boxes plus JPEG crops
-- `GET /api/v1/faces/list` - List trained faces, including `thumbnail_url` when a saved training sample exists
+- `GET /api/v1/faces/list` - List one visible profile per name, including `sample_count` and `thumbnail_url` when a saved training sample exists
 - `GET /api/v1/faces/{face_id}/image` - Return the stored training sample thumbnail
-- `DELETE /api/v1/faces/{face_id}` - Delete a trained face
+- `DELETE /api/v1/faces/{face_id}` - Delete the visible profile and all samples with the same name
 
 ### Example: Detect objects in an image
 

@@ -69,5 +69,38 @@ class FaceDB:
         # Update cache
         self.faces_cache = [f for f in self.faces_cache if f[0] != face_id]
 
+    def get_face_name(self, face_id: int) -> Optional[str]:
+        for cached_id, name, _ in self.faces_cache:
+            if cached_id == face_id:
+                return name
+        return None
+
+    def delete_faces_by_name(self, name: str) -> List[int]:
+        normalized = (name or "").strip().lower()
+        if not normalized:
+            return []
+
+        deleted_ids = [
+            face_id
+            for face_id, face_name, _ in self.faces_cache
+            if face_name.strip().lower() == normalized
+        ]
+        if not deleted_ids:
+            return []
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM known_faces WHERE lower(trim(name)) = ?', (normalized,))
+        conn.commit()
+        conn.close()
+
+        self.faces_cache = [
+            item
+            for item in self.faces_cache
+            if item[0] not in deleted_ids
+        ]
+        logger.info(f"Deleted {len(deleted_ids)} face sample(s) for '{name}'")
+        return deleted_ids
+
     def get_all_faces(self) -> List[Tuple[int, str, np.ndarray]]:
         return self.faces_cache

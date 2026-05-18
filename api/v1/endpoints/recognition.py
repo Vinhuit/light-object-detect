@@ -170,6 +170,10 @@ async def train_face(
     """
     Train a new face for the given name.
     """
+    name = name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required.")
+
     try:
         contents = await file.read()
         image = Image.open(io.BytesIO(contents))
@@ -215,6 +219,10 @@ async def train_face_from_box(
     normalized target box. This is useful when a saved review crop is too
     degraded for a second detector pass.
     """
+    name = name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required.")
+
     try:
         contents = await file.read()
         image = Image.open(io.BytesIO(contents))
@@ -397,6 +405,7 @@ async def detect_faces(
 class FaceListItem(BaseModel):
     id: int
     name: str
+    sample_count: int = 1
     thumbnail_url: Optional[str] = None
 
 class FaceListResponse(BaseModel):
@@ -410,17 +419,37 @@ class DeleteFaceResponse(BaseModel):
 @router.get("/faces/list", response_model=FaceListResponse)
 async def list_faces():
     """
-    List all trained faces.
+    List trained people, grouping multiple samples with the same name.
     """
     db = get_face_db()
     known_faces = db.get_all_faces()
     
-    faces_list = []
+    grouped = {}
     for face_id, name, _ in known_faces:
-        thumbnail_url = None
+        display_name = (name or "").strip() or "Unknown"
+        key = display_name.lower()
+        group = grouped.setdefault(key, {
+            "id": face_id,
+            "name": display_name,
+            "sample_count": 0,
+            "thumbnail_id": None,
+        })
+        group["sample_count"] += 1
+        group["id"] = min(group["id"], face_id)
         if _face_sample_path(face_id).exists():
-            thumbnail_url = f"/api/v1/faces/{face_id}/image"
-        faces_list.append(FaceListItem(id=face_id, name=name, thumbnail_url=thumbnail_url))
+            group["thumbnail_id"] = face_id
+
+    faces_list = []
+    for group in sorted(grouped.values(), key=lambda item: item["name"].lower()):
+        thumbnail_url = None
+        if group["thumbnail_id"] is not None:
+            thumbnail_url = f"/api/v1/faces/{group['thumbnail_id']}/image"
+        faces_list.append(FaceListItem(
+            id=group["id"],
+            name=group["name"],
+            sample_count=group["sample_count"],
+            thumbnail_url=thumbnail_url,
+        ))
         
     return FaceListResponse(
         success=True,
@@ -444,23 +473,24 @@ async def get_face_image(face_id: int):
 @router.delete("/faces/{face_id}", response_model=DeleteFaceResponse)
 async def delete_face(face_id: int):
     """
-    Delete a trained face by ID.
+    Delete a visible face profile by ID. If multiple samples have the same
+    name, all of those samples are removed together.
     """
     db = get_face_db()
-    # Check if face exists in cache
-    face_exists = any(f[0] == face_id for f in db.get_all_faces())
-    if not face_exists:
+    face_name = db.get_face_name(face_id)
+    if face_name is None:
         raise HTTPException(status_code=404, detail=f"Face with ID {face_id} not found.")
         
-    db.delete_face(face_id)
-    image_path = _face_sample_path(face_id)
-    try:
-        if image_path.exists():
-            image_path.unlink()
-    except Exception as e:
-        logger.warning(f"Failed to delete face sample for ID {face_id}: {str(e)}")
+    deleted_ids = db.delete_faces_by_name(face_name)
+    for deleted_id in deleted_ids:
+        image_path = _face_sample_path(deleted_id)
+        try:
+            if image_path.exists():
+                image_path.unlink()
+        except Exception as e:
+            logger.warning(f"Failed to delete face sample for ID {deleted_id}: {str(e)}")
 
     return DeleteFaceResponse(
         success=True,
-        message=f"Successfully deleted face with ID {face_id}."
+        message=f"Successfully deleted {len(deleted_ids)} sample(s) for '{face_name}'."
     )
