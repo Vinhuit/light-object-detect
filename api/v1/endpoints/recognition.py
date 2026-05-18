@@ -1,11 +1,13 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 import io
 import base64
 from PIL import Image
 import time
 import logging
+from pathlib import Path
 
 from config import settings
 from utils.image import validate_image, preprocess_image
@@ -140,6 +142,26 @@ def _resize_crop_for_review(crop: Image.Image) -> Image.Image:
     )
     return crop.resize(new_size, Image.Resampling.LANCZOS)
 
+def _face_sample_dir() -> Path:
+    db_path = Path(settings.FACE_DB_PATH)
+    sample_dir = db_path.parent / "face_samples"
+    sample_dir.mkdir(parents=True, exist_ok=True)
+    return sample_dir
+
+def _face_sample_path(face_id: int) -> Path:
+    return _face_sample_dir() / f"{face_id}.jpg"
+
+def _save_face_sample(face_id: int, image: Image.Image) -> None:
+    sample = image.copy()
+    if sample.mode != "RGB":
+        sample = sample.convert("RGB")
+
+    max_size = _clamp_int(settings.FACE_CROP_MAX_SIZE, 160, 2048)
+    sample.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+
+    quality = _clamp_int(settings.FACE_CROP_JPEG_QUALITY, 60, 100)
+    sample.save(_face_sample_path(face_id), format="JPEG", quality=quality, optimize=True)
+
 @router.post("/faces/train", response_model=TrainResponse)
 async def train_face(
     name: str = Form(...),
@@ -167,6 +189,10 @@ async def train_face(
         raise HTTPException(status_code=400, detail="No face detected in the image.")
 
     face_id = db.add_face(name, embedding)
+    try:
+        _save_face_sample(face_id, image)
+    except Exception as e:
+        logger.warning(f"Failed to save face sample for ID {face_id}: {str(e)}")
 
     return TrainResponse(
         success=True,
@@ -306,6 +332,7 @@ async def detect_faces(
 class FaceListItem(BaseModel):
     id: int
     name: str
+    thumbnail_url: Optional[str] = None
 
 class FaceListResponse(BaseModel):
     success: bool
@@ -325,11 +352,28 @@ async def list_faces():
     
     faces_list = []
     for face_id, name, _ in known_faces:
-        faces_list.append(FaceListItem(id=face_id, name=name))
+        thumbnail_url = None
+        if _face_sample_path(face_id).exists():
+            thumbnail_url = f"/api/v1/faces/{face_id}/image"
+        faces_list.append(FaceListItem(id=face_id, name=name, thumbnail_url=thumbnail_url))
         
     return FaceListResponse(
         success=True,
         faces=faces_list
+    )
+
+@router.get("/faces/{face_id}/image")
+async def get_face_image(face_id: int):
+    """
+    Return the stored training sample image for a face profile.
+    """
+    image_path = _face_sample_path(face_id)
+    if not image_path.exists():
+        raise HTTPException(status_code=404, detail=f"Image for face ID {face_id} not found.")
+    return FileResponse(
+        path=str(image_path),
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=86400"}
     )
 
 @router.delete("/faces/{face_id}", response_model=DeleteFaceResponse)
@@ -344,6 +388,13 @@ async def delete_face(face_id: int):
         raise HTTPException(status_code=404, detail=f"Face with ID {face_id} not found.")
         
     db.delete_face(face_id)
+    image_path = _face_sample_path(face_id)
+    try:
+        if image_path.exists():
+            image_path.unlink()
+    except Exception as e:
+        logger.warning(f"Failed to delete face sample for ID {face_id}: {str(e)}")
+
     return DeleteFaceResponse(
         success=True,
         message=f"Successfully deleted face with ID {face_id}."

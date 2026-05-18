@@ -106,7 +106,7 @@ When running both services in the same Docker Compose project, the service name 
 - `http://light-object-detect:8000/api/v1/detect`
 - `http://light-object-detect:8000/api/v1/faces/recognize`
 
-Face embeddings are stored in `data/faces.db` by default. Mount `/app/data` as a Docker volume if you want trained faces to survive container rebuilds.
+Face embeddings are stored in `data/faces.db` by default. Training sample thumbnails are stored in `data/face_samples/`. Mount `/app/data` as a Docker volume if you want trained faces and library thumbnails to survive container rebuilds.
 
 Face crop quality can be tuned with environment variables:
 
@@ -125,7 +125,8 @@ Face crop quality can be tuned with environment variables:
 - `POST /api/v1/faces/train` - Train a known face from an uploaded image
 - `POST /api/v1/faces/recognize` - Recognize the most prominent face in an uploaded image
 - `POST /api/v1/faces/detect` - Detect all faces and return normalized boxes plus JPEG crops
-- `GET /api/v1/faces/list` - List trained faces
+- `GET /api/v1/faces/list` - List trained faces, including `thumbnail_url` when a saved training sample exists
+- `GET /api/v1/faces/{face_id}/image` - Return the stored training sample thumbnail
 - `DELETE /api/v1/faces/{face_id}` - Delete a trained face
 
 ### Example: Detect objects in an image
