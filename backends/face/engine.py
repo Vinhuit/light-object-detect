@@ -2,7 +2,7 @@ import numpy as np
 import logging
 from PIL import Image
 import cv2
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 try:
     from insightface.app import FaceAnalysis
@@ -47,6 +47,57 @@ class FaceEngine:
         
         # Normed embedding is usually a 512-d array
         return largest_face.normed_embedding
+
+    def get_embedding_for_box(
+        self,
+        image: Image.Image,
+        target_box: Tuple[float, float, float, float],
+    ) -> Optional[Tuple[np.ndarray, dict]]:
+        """
+        Extract the embedding for the detected face that best matches a target box.
+        target_box uses source-image pixel coordinates: x1, y1, x2, y2.
+        """
+        img_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+        faces = self.app.get(img_cv)
+
+        if not faces:
+            return None
+
+        tx1, ty1, tx2, ty2 = target_box
+        target_w = max(1.0, tx2 - tx1)
+        target_h = max(1.0, ty2 - ty1)
+        target_cx = (tx1 + tx2) / 2.0
+        target_cy = (ty1 + ty2) / 2.0
+        target_area = target_w * target_h
+
+        def score(face) -> float:
+            fx1, fy1, fx2, fy2 = [float(v) for v in face.bbox.tolist()]
+            inter_x1 = max(tx1, fx1)
+            inter_y1 = max(ty1, fy1)
+            inter_x2 = min(tx2, fx2)
+            inter_y2 = min(ty2, fy2)
+            inter_area = max(0.0, inter_x2 - inter_x1) * max(0.0, inter_y2 - inter_y1)
+            face_area = max(1.0, fx2 - fx1) * max(1.0, fy2 - fy1)
+            union = max(1.0, target_area + face_area - inter_area)
+            iou = inter_area / union
+
+            face_cx = (fx1 + fx2) / 2.0
+            face_cy = (fy1 + fy2) / 2.0
+            norm_dx = (face_cx - target_cx) / target_w
+            norm_dy = (face_cy - target_cy) / target_h
+            center_score = 1.0 / (1.0 + norm_dx * norm_dx + norm_dy * norm_dy)
+            return iou * 2.0 + center_score
+
+        best_face = max(faces, key=score)
+        x1, y1, x2, y2 = [float(v) for v in best_face.bbox.tolist()]
+        confidence = float(getattr(best_face, "det_score", 0.0) or 0.0)
+        return best_face.normed_embedding, {
+            "x1": x1,
+            "y1": y1,
+            "x2": x2,
+            "y2": y2,
+            "confidence": confidence,
+        }
 
     def detect_faces(self, image: Image.Image) -> List[dict]:
         """

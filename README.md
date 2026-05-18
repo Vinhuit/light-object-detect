@@ -123,6 +123,7 @@ Face crop quality can be tuned with environment variables:
 - `GET /api/v1/backends` - List available detection backends
 - `POST /api/v1/detect` - Detect objects in an uploaded image
 - `POST /api/v1/faces/train` - Train a known face from an uploaded image
+- `POST /api/v1/faces/train-box` - Train from a full image while selecting the detected face nearest a normalized target box
 - `POST /api/v1/faces/recognize` - Recognize the most prominent face in an uploaded image
 - `POST /api/v1/faces/detect` - Detect all faces and return normalized boxes plus JPEG crops
 - `GET /api/v1/faces/list` - List trained faces, including `thumbnail_url` when a saved training sample exists

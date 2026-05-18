@@ -201,6 +201,71 @@ async def train_face(
         message=f"Successfully trained face for '{name}'."
     )
 
+@router.post("/faces/train-box", response_model=TrainResponse)
+async def train_face_from_box(
+    name: str = Form(...),
+    bbox_x: float = Form(...),
+    bbox_y: float = Form(...),
+    bbox_w: float = Form(...),
+    bbox_h: float = Form(...),
+    file: UploadFile = File(...),
+):
+    """
+    Train a face from a full image, selecting the detected face nearest a
+    normalized target box. This is useful when a saved review crop is too
+    degraded for a second detector pass.
+    """
+    try:
+        contents = await file.read()
+        image = Image.open(io.BytesIO(contents))
+        validate_image(image, file.filename)
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+    except Exception as e:
+        logger.error(f"Image validation failed: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Invalid image: {str(e)}")
+
+    width, height = image.size
+    x1 = _clamp_int(int(round(bbox_x * width)), 0, width)
+    y1 = _clamp_int(int(round(bbox_y * height)), 0, height)
+    x2 = _clamp_int(int(round((bbox_x + bbox_w) * width)), 0, width)
+    y2 = _clamp_int(int(round((bbox_y + bbox_h) * height)), 0, height)
+    if x2 <= x1 or y2 <= y1:
+        raise HTTPException(status_code=400, detail="Invalid face box.")
+
+    engine = get_face_engine()
+    db = get_face_db()
+
+    selected = engine.get_embedding_for_box(image, (x1, y1, x2, y2))
+    if selected is None:
+        raise HTTPException(status_code=400, detail="No face detected in the image.")
+
+    embedding, selected_box = selected
+    face_id = db.add_face(name, embedding)
+
+    try:
+        crop_box = _square_crop_box(
+            selected_box["x1"],
+            selected_box["y1"],
+            selected_box["x2"],
+            selected_box["y2"],
+            width,
+            height,
+            settings.FACE_CROP_PADDING_RATIO,
+        )
+        sample = image.crop(crop_box)
+        sample = _resize_crop_for_review(sample)
+        _save_face_sample(face_id, sample)
+    except Exception as e:
+        logger.warning(f"Failed to save face sample for ID {face_id}: {str(e)}")
+
+    return TrainResponse(
+        success=True,
+        face_id=face_id,
+        name=name,
+        message=f"Successfully trained face for '{name}'."
+    )
+
 @router.post("/faces/recognize", response_model=RecognizeResponse)
 async def recognize_face(
     file: UploadFile = File(...)
