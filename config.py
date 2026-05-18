@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     # Face Recognition settings
     FACE_DB_PATH: str = "data/faces.db"
     FACE_MATCH_THRESHOLD: float = 0.5  # Cosine similarity threshold for arcface
+    FACE_DET_SIZE: int = 960  # InsightFace detector input size; larger helps small camera faces
+    FACE_CROP_PADDING_RATIO: float = 0.6  # Padding around detected face, relative to face size
+    FACE_CROP_MIN_SIZE: int = 320  # Upscale small crops for UI review and training consistency
+    FACE_CROP_MAX_SIZE: int = 768  # Bound response size and storage use
+    FACE_CROP_JPEG_QUALITY: int = 95
 
     class Config:
         env_file = ".env"

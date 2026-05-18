@@ -28,7 +28,7 @@ def get_face_engine() -> "FaceEngine":
     if not INSIGHTFACE_AVAILABLE:
         raise HTTPException(status_code=500, detail="InsightFace is not installed.")
     if _face_engine is None:
-        _face_engine = FaceEngine(use_gpu=False)
+        _face_engine = FaceEngine(use_gpu=False, det_size=settings.FACE_DET_SIZE)
     return _face_engine
 
 def get_face_db() -> FaceDB:
@@ -59,6 +59,8 @@ class DetectedFace(BaseModel):
     index: int
     bbox: FaceBox
     confidence: float
+    crop_width: int
+    crop_height: int
     crop_jpeg_base64: str
 
 class FaceDetectResponse(BaseModel):
@@ -66,6 +68,77 @@ class FaceDetectResponse(BaseModel):
     face_count: int
     faces: List[DetectedFace]
     process_time_ms: int
+
+def _clamp_int(value: int, minimum: int, maximum: int) -> int:
+    return max(minimum, min(value, maximum))
+
+def _square_crop_box(
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    image_width: int,
+    image_height: int,
+    padding_ratio: float,
+) -> tuple[int, int, int, int]:
+    face_w = max(1.0, x2 - x1)
+    face_h = max(1.0, y2 - y1)
+    center_x = (x1 + x2) / 2.0
+    center_y = (y1 + y2) / 2.0
+    side = max(face_w, face_h) * (1.0 + 2.0 * max(0.0, padding_ratio))
+
+    max_side = float(max(1, min(image_width, image_height)))
+    side = min(side, max_side)
+
+    side_i = max(1, int(round(side)))
+    left = int(round(center_x - side_i / 2.0))
+    top = int(round(center_y - side_i / 2.0))
+    right = left + side_i
+    bottom = top + side_i
+
+    if left < 0:
+        right -= left
+        left = 0
+    if top < 0:
+        bottom -= top
+        top = 0
+    if right > image_width:
+        left -= right - image_width
+        right = image_width
+    if bottom > image_height:
+        top -= bottom - image_height
+        bottom = image_height
+
+    left = max(0, left)
+    top = max(0, top)
+    right = min(image_width, right)
+    bottom = min(image_height, bottom)
+
+    if right <= left:
+        right = min(image_width, left + 1)
+    if bottom <= top:
+        bottom = min(image_height, top + 1)
+
+    return left, top, right, bottom
+
+def _resize_crop_for_review(crop: Image.Image) -> Image.Image:
+    min_size = _clamp_int(settings.FACE_CROP_MIN_SIZE, 64, 2048)
+    max_size = _clamp_int(settings.FACE_CROP_MAX_SIZE, min_size, 2048)
+    longest = max(crop.size)
+
+    if longest < min_size:
+        target = min_size
+    elif longest > max_size:
+        target = max_size
+    else:
+        return crop
+
+    scale = target / float(longest)
+    new_size = (
+        max(1, int(round(crop.width * scale))),
+        max(1, int(round(crop.height * scale))),
+    )
+    return crop.resize(new_size, Image.Resampling.LANCZOS)
 
 @router.post("/faces/train", response_model=TrainResponse)
 async def train_face(
@@ -192,17 +265,20 @@ async def detect_faces(
 
         face_w = x2 - x1
         face_h = y2 - y1
-        pad_x = face_w * 0.30
-        pad_y = face_h * 0.30
-        crop_box = (
-            max(0, int(x1 - pad_x)),
-            max(0, int(y1 - pad_y)),
-            min(width, int(x2 + pad_x)),
-            min(height, int(y2 + pad_y)),
+        crop_box = _square_crop_box(
+            x1,
+            y1,
+            x2,
+            y2,
+            width,
+            height,
+            settings.FACE_CROP_PADDING_RATIO,
         )
         crop = image.crop(crop_box)
+        crop = _resize_crop_for_review(crop)
         buf = io.BytesIO()
-        crop.save(buf, format="JPEG", quality=90)
+        quality = _clamp_int(settings.FACE_CROP_JPEG_QUALITY, 60, 100)
+        crop.save(buf, format="JPEG", quality=quality, optimize=True)
         crop_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
         faces.append(DetectedFace(
@@ -214,6 +290,8 @@ async def detect_faces(
                 height=face_h / height,
             ),
             confidence=float(item.get("confidence", 0.0)),
+            crop_width=crop.width,
+            crop_height=crop.height,
             crop_jpeg_base64=crop_b64,
         ))
 

@@ -13,18 +13,19 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 class FaceEngine:
-    def __init__(self, use_gpu: bool = False):
+    def __init__(self, use_gpu: bool = False, det_size: int = 640):
         if not INSIGHTFACE_AVAILABLE:
             raise ImportError("insightface is not installed. Please install it to use Face Recognition.")
         
         self.use_gpu = use_gpu
         providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if use_gpu else ['CPUExecutionProvider']
+        det_size = max(320, min(int(det_size or 640), 1280))
         
-        logger.info("Loading InsightFace model...")
+        logger.info("Loading InsightFace model with detector size %dx%d...", det_size, det_size)
         # Initialize FaceAnalysis (this downloads models if not present, typically buffalo_l)
         # We specify name='buffalo_l' which includes retinaface (detection) and arcface (recognition)
         self.app = FaceAnalysis(name='buffalo_l', providers=providers)
-        self.app.prepare(ctx_id=0 if use_gpu else -1, det_size=(640, 640))
+        self.app.prepare(ctx_id=0 if use_gpu else -1, det_size=(det_size, det_size))
         logger.info("InsightFace model loaded successfully.")
 
     def get_embedding(self, image: Image.Image) -> Optional[np.ndarray]:

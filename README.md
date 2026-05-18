@@ -108,6 +108,14 @@ When running both services in the same Docker Compose project, the service name 
 
 Face embeddings are stored in `data/faces.db` by default. Mount `/app/data` as a Docker volume if you want trained faces to survive container rebuilds.
 
+Face crop quality can be tuned with environment variables:
+
+- `FACE_DET_SIZE` - InsightFace detector input size. Default: `960`; raise toward `1280` for smaller/distant faces if CPU allows.
+- `FACE_CROP_PADDING_RATIO` - Extra context around the detected face. Default: `0.6`.
+- `FACE_CROP_MIN_SIZE` - Small crops are upscaled to at least this size for review/training. Default: `320`.
+- `FACE_CROP_MAX_SIZE` - Large crops are downscaled to cap response/storage size. Default: `768`.
+- `FACE_CROP_JPEG_QUALITY` - JPEG quality for returned crops. Default: `95`.
+
 ## API Endpoints
 
 - `GET /` - Root endpoint with API information
@@ -181,6 +189,8 @@ Example response:
         "height": 0.22
       },
       "confidence": 0.86,
+      "crop_width": 320,
+      "crop_height": 320,
       "crop_jpeg_base64": "..."
     }
   ],
